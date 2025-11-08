@@ -1,0 +1,215 @@
+import logging
+import json
+import os # Importante para aceder ao sistema de ficheiros
+from datetime import datetime
+from flask import Flask, request # A ferramenta para criar o "Serviço Web"
+
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+
+# --- Configuração Inicial ---
+
+# Esta linha lê o Token "secreto" que vamos configurar no Render
+# Não precisas de editar nada aqui!
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
+
+# Esta linha lê o URL (link) que o Render nos vai dar
+APP_URL = os.environ.get("RENDER_EXTERNAL_URL")
+
+# --- Configuração do Disco Persistente (A "Gaveta" da Agenda) ---
+# O Render dá-nos esta pasta especial que não apaga os ficheiros
+DATA_DIR = "/var/data/render"
+FICHEIRO_AGENDA = os.path.join(DATA_DIR, "agenda.json")
+
+# Configura o logging (para vermos mensagens de status)
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# --- Funções de Gestão da Agenda (A "Gaveta") ---
+
+def garantir_diretorio_dados():
+    """Garante que a pasta-gaveta existe."""
+    if not os.path.exists(DATA_DIR):
+        try:
+            os.makedirs(DATA_DIR)
+            logger.info(f"Diretório de dados criado com sucesso em: {DATA_DIR}")
+        except Exception as e:
+            logger.error(f"Falha ao criar diretório {DATA_DIR}: {e}")
+
+def carregar_agenda():
+    """Carrega a agenda a partir da nossa "gaveta"."""
+    garantir_diretorio_dados() # Garante que a pasta existe antes de tentar ler
+    try:
+        with open(FICHEIRO_AGENDA, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        logger.info(f"Ficheiro {FICHEIRO_AGENDA} não encontrado. A criar um novo.")
+        return {}
+    except json.JSONDecodeError:
+        logger.warning(f"Erro ao ler o JSON em {FICHEIRO_AGENDA}. A começar de novo.")
+        return {}
+
+def salvar_agenda(agenda):
+    """Salva a agenda na nossa "gaveta"."""
+    garantir_diretorio_dados() # Garante que a pasta existe antes de tentar escrever
+    try:
+        with open(FICHEIRO_AGENDA, 'w', encoding='utf-8') as f:
+            json.dump(agenda, f, indent=4, ensure_ascii=False)
+        logger.info("Agenda salva com sucesso no disco persistente.")
+    except Exception as e:
+        logger.error(f"Erro ao salvar a agenda em {FICHEIRO_AGENDA}: {e}")
+
+# --- Funções do Bot (O que ele faz) ---
+# Estas funções são as que respondem ao utilizador.
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Envia uma mensagem de boas-vindas."""
+    nome_utilizador = update.effective_user.first_name
+    mensagem_ajuda = (
+        f"Olá, {nome_utilizador}! Eu sou o teu assistente de agendamentos 24/7.\n\n"
+        "Como usar:\n"
+        "1. Para agendar, envia-me uma mensagem no formato:\n"
+        "   `NomeDoCachorro-DD/MM/AAAA-HH:MM`\n"
+        "   (Exemplo: `Bolinha-25/12/2025-14:30`)\n\n"
+        "2. Para ver os agendamentos de hoje, escreve:\n"
+        "   `agenda do dia`\n\n"
+        "Podes também usar /ajuda para ver esta mensagem."
+    )
+    await update.message.reply_text(mensagem_ajuda, parse_mode='Markdown')
+
+async def tratar_agendamento(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Trata das mensagens que parecem ser um agendamento."""
+    texto_mensagem = update.message.text
+    partes = texto_mensagem.split('-')
+    
+    if len(partes) != 3:
+        await update.message.reply_text("Formato inválido. 😕 Tenta usar: `Nome-Data-Hora` (ex: `Bolinha-25/12/2025-14:30`)", parse_mode='Markdown')
+        return
+
+    nome = partes[0].strip()
+    data_str = partes[1].strip()
+    hora_str = partes[2].strip()
+
+    try:
+        # Tenta validar a data e hora
+        data_hora_obj = datetime.strptime(f"{data_str} {hora_str}", "%d/%m/%Y %H:%M")
+        # Guarda a data no formato AAAA-MM-DD (melhor para ordenar)
+        data_iso = data_hora_obj.strftime("%Y-%m-%d")
+        
+    except ValueError:
+        await update.message.reply_text(
+            "Data ou hora em formato inválido. 😕\n"
+            "Usa `DD/MM/AAAA` para a data (ex: `25/12/2025`).\n"
+            "Usa `HH:MM` para a hora (ex: `14:30`)."
+        , parse_mode='Markdown')
+        return
+
+    # Se tudo estiver válido, carrega a agenda
+    agenda = carregar_agenda()
+    
+    # Adiciona o novo agendamento no dia certo
+    if data_iso not in agenda:
+        agenda[data_iso] = [] 
+
+    novo_agendamento = {"nome_cachorro": nome, "hora": hora_str}
+    agenda[data_iso].append(novo_agendamento)
+    
+    # Ordena os agendamentos do dia pela hora
+    agenda[data_iso].sort(key=lambda x: x['hora'])
+
+    # Salva e confirma ao utilizador
+    salvar_agenda(agenda)
+    await update.message.reply_text(f"✅ Agendamento confirmado!\nCachorro: {nome}\nDia: {data_str}\nHora: {hora_str}")
+
+async def ver_agenda_dia(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Mostra os agendamentos para o dia de hoje."""
+    hoje = datetime.now()
+    hoje_iso = hoje.strftime("%Y-%m-%d") # Formato AAAA-MM-DD
+    hoje_formatado = hoje.strftime("%d/%m/%Y") # Formato DD/MM/AAAA
+
+    agenda = carregar_agenda()
+
+    # Verifica se existe agenda para hoje
+    if hoje_iso not in agenda or not agenda[hoje_iso]:
+        await update.message.reply_text(f"Não tens agendamentos para hoje, dia {hoje_formatado}. 😊")
+        return
+
+    # Se existir, formata a mensagem
+    agendamentos_hoje = agenda[hoje_iso]
+    mensagem = f"🗓️ *Agenda do Dia: {hoje_formatado}*\n"
+    mensagem += "------------------------------\n"
+    for ag in agendamentos_hoje:
+        mensagem += f"▪️ *{ag['hora']}* - {ag['nome_cão']}\n"
+    await update.message.reply_text(mensagem, parse_mode='Markdown')
+
+
+async def fallback_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Resposta para texto que não corresponde a nenhum comando."""
+    await update.message.reply_text(
+        "Não entendi... 😕\n\n"
+        "Lembra-te dos comandos:\n"
+        "Para agendar: `Nome-Data-Hora`\n"
+        "Para ver hoje: `agenda do dia`\n"
+        "Ou usa /ajuda."
+    , parse_mode='Markdown')
+
+# --- A parte que "liga" o bot (o Webhook) ---
+
+# 1. Inicia a aplicação do bot (mas NÃO inicia o "polling")
+if TOKEN:
+    application = Application.builder().token(TOKEN).build()
+else:
+    logger.error("TELEGRAM_TOKEN não foi encontrado! O bot não pode iniciar.")
+    # Se esta mensagem aparecer no Log do Render, é porque esqueceste-te
+    # de adicionar a Variável de Ambiente.
+
+# 2. Adiciona os Handlers (os "ouvintes" de comandos)
+application.add_handler(CommandHandler("start", start))
+application.add_handler(CommandHandler("ajuda", start))
+application.add_handler(MessageHandler(filters.Regex(r'^(?i)agenda do dia$'), ver_agenda_dia))
+application.add_handler(MessageHandler(filters.Regex(r'.*-.+-.+'), tratar_agendamento))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback_text))
+
+# 3. Inicia o servidor Web (Flask)
+# Este 'app' é o que o Render vai executar
+app = Flask(__name__)
+
+@app.route("/")
+def index():
+    """Página inicial simples para verificar se o bot está vivo."""
+    return "Olá! Eu sou o servidor do bot de agendamento. Estou a funcionar."
+
+@app.route(f"/webhook/{TOKEN}", methods=['POST'])
+async def webhook():
+    """Esta é a rota (URL) que o Telegram vai 'visitar' quando receber mensagem."""
+    try:
+        update_json = request.get_json(force=True)
+        update = Update.de_json(update_json, application.bot)
+        await application.process_update(update)
+        return "ok", 200 # Responde ao Telegram que recebeu
+    except Exception as e:
+        logger.error(f"Erro no webhook: {e}")
+        return "error", 500
+
+@app.route("/setup_webhook")
+async def setup_webhook():
+    """
+    Uma rota especial que vamos visitar 1 ÚNICA VEZ
+    para dizer ao Telegram qual é o nosso URL.
+    """
+    if not APP_URL:
+        return "Erro: Variavel 'RENDER_EXTERNAL_URL' não definida."
+        
+    # O URL completo que o Telegram vai chamar
+    webhook_url = f"{APP_URL}/webhook/{TOKEN}"
+    
+    try:
+        # Define o webhook
+        await application.bot.set_webhook(url=webhook_url)
+        logger.info(f"Webhook configurado com sucesso para: {webhook_url}")
+        return f"Webhook configurado com sucesso!", 200
+    except Exception as e:
+        logger.error(f"Erro ao configurar o webhook: {e}")
+        return f"Erro ao configurar o webhook: {e}", 500
