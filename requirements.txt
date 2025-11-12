@@ -1,5 +1,5 @@
 python-telegram-bot[job-queue]
-Flask
+quart
 pymongo[srv]
 dnspython
 hypercorn
