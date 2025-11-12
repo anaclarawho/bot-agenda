@@ -11,8 +11,7 @@ from pymongo.errors import ConnectionFailure, OperationFailure
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
-# --- CORREÇÃO: O LOGGING VEM PRIMEIRO! ---
-# Agora definimos o "caderno" de logs aqui no topo
+# --- O LOGGING VEM PRIMEIRO! ---
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
@@ -20,54 +19,33 @@ logger = logging.getLogger(__name__)
 # --- FIM DA CORREÇÃO ---
 
 # --- Configuração Inicial ---
-
-# "Etiqueta Secreta" 1: O Token do Bot (do BotFather)
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
-
-# "Etiqueta Secreta" 2: O Link/Chave Secreta do MongoDB
 MONGO_URI = os.environ.get("MONGO_URI")
-
-# "Etiqueta Secreta" 3: O Link do Render (dado automaticamente)
 APP_URL = os.environ.get("RENDER_EXTERNAL_URL")
 
 # --- Configuração da "Memória" (MongoDB) ---
 client = None # Começa como "None"
 try:
-    # Tenta criar um "cliente" (um assistente) para o MongoDB
     client = MongoClient(MONGO_URI)
-    
-    # Tenta "pingar" a base de dados para ver se a ligação funciona
     client.admin.command('ping')
-    
-    # Se funcionar, definimos onde vamos guardar as coisas
     db = client.get_database("agenda_bot_db") # Nome da base de dados
     agenda_collection = db.get_collection("agendamentos") # Nome da "gaveta" (coleção)
-    
     logger.info("✅ Ligação ao MongoDB (Memória) estabelecida com sucesso!")
-
 except (ConnectionFailure, OperationFailure) as e:
     logger.error(f"❌ FALHA AO LIGAR AO MONGODB: {e}")
     logger.error("Verifica se a 'MONGO_URI' está correta no Render e se o IP 0.0.0.0/0 está no Network Access do MongoDB.")
-    
 except Exception as e:
     logger.error(f"❌ Erro inesperado ao ligar ao MongoDB: {e}")
     
 
-# --- NOVAS Funções de Gestão da Agenda (A "Memória" MongoDB) ---
+# --- Funções de Gestão da Agenda (A "Memória" MongoDB) ---
 
 def salvar_agendamento(data_iso, hora_str, nome_cachorro):
     """Salva UM agendamento na base de dados."""
     if not client:
         logger.error("Não é possível salvar, sem ligação ao MongoDB.")
         return False
-        
     try:
-        # Em vez de carregar um ficheiro, procuramos um "documento" (registo)
-        # com a data que queremos.
-        
-        # $push = "adiciona a esta lista"
-        # $sort = "ordena a lista pela hora"
-        # upsert=True = "Se este dia não existir, cria-o"
         agenda_collection.update_one(
             {"data_iso": data_iso}, # O filtro: encontra o dia
             {
@@ -82,8 +60,7 @@ def salvar_agendamento(data_iso, hora_str, nome_cachorro):
             upsert=True # Cria o documento se ele não existir
         )
         
-        # Como o $push não ordena automaticamente, temos de re-ordenar
-        # Esta é uma operação extra, mas garante a ordem
+        # Re-ordenar a lista
         agenda_collection.update_one(
             {"data_iso": data_iso},
             {
@@ -95,10 +72,8 @@ def salvar_agendamento(data_iso, hora_str, nome_cachorro):
                 }
             }
         )
-        
         logger.info(f"Agendamento salvo para {data_iso} @ {hora_str}.")
         return True
-        
     except Exception as e:
         logger.error(f"Erro ao salvar no MongoDB: {e}")
         return False
@@ -108,24 +83,17 @@ def carregar_agenda_dia(data_iso):
     if not client:
         logger.error("Não é possível carregar, sem ligação ao MongoDB.")
         return None
-
     try:
-        # .find_one() procura por um documento que corresponda ao filtro
         documento_dia = agenda_collection.find_one({"data_iso": data_iso})
-        
         if documento_dia:
-            # Retorna apenas a lista de "agendamentos" desse dia
             return documento_dia.get("agendamentos", [])
         else:
-            # Não encontrou nada para esse dia
             return []
-            
     except Exception as e:
         logger.error(f"Erro ao carregar do MongoDB: {e}")
         return None
 
 # --- Funções do Bot (O que ele faz) ---
-# (Estas são quase iguais a antes, mas agora usam as novas funções)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Envia uma mensagem de boas-vindas."""
@@ -156,11 +124,8 @@ async def tratar_agendamento(update: Update, context: ContextTypes.DEFAULT_TYPE)
     hora_str = partes[2].strip()
 
     try:
-        # Tenta validar a data e hora
         data_hora_obj = datetime.strptime(f"{data_str} {hora_str}", "%d/%m/%Y %H:%M")
-        # Guarda a data no formato AAAA-MM-DD (melhor para o MongoDB)
         data_iso = data_hora_obj.strftime("%Y-%m-%d")
-        
     except ValueError:
         await update.message.reply_text(
             "Data ou hora em formato inválido. 😕\n"
@@ -169,7 +134,6 @@ async def tratar_agendamento(update: Update, context: ContextTypes.DEFAULT_TYPE)
         , parse_mode='Markdown')
         return
 
-    # Se tudo estiver válido, tenta salvar na "Memória"
     sucesso = salvar_agendamento(data_iso, hora_str, nome)
 
     if sucesso:
@@ -185,7 +149,6 @@ async def ver_agenda_dia(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     agendamentos_hoje = carregar_agenda_dia(hoje_iso)
 
-    # Verifica se a função retornou "None" (erro) ou uma lista vazia
     if agendamentos_hoje is None:
          await update.message.reply_text("❌ Ocorreu um erro ao consultar a agenda. Tenta novamente mais tarde.")
          return
@@ -194,10 +157,8 @@ async def ver_agenda_dia(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Não tens agendamentos para hoje, dia {hoje_formatado}. 😊")
         return
 
-    # Se existir, formata a mensagem
     mensagem = f"🗓️ *Agenda do Dia: {hoje_formatado}*\n"
     mensagem += "------------------------------\n"
-    # A agenda já vem ordenada do MongoDB
     for ag in agendamentos_hoje:
         mensagem += f"▪️ *{ag['hora']}* - {ag['nome_cachorro']}\n"
     await update.message.reply_text(mensagem, parse_mode='Markdown')
@@ -213,7 +174,6 @@ async def fallback_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     , parse_mode='Markdown')
 
 # --- A parte que "liga" o bot (o Webhook) ---
-# Esta parte é a mesma de antes
 
 # 1. Inicia a aplicação do bot
 if TOKEN:
@@ -224,7 +184,12 @@ else:
 # 2. Adiciona os Handlers (os "ouvintes" de comandos)
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("ajuda", start))
-application.add_handler(MessageHandler(filters.Regex(r'^(?i)agenda do dia$'), ver_agenda_dia))
+
+# ----- ESTA É A LINHA QUE FOI CORRIGIDA -----
+# O (?i) (flag) veio para antes do ^ (início)
+application.add_handler(MessageHandler(filters.Regex(r'(?i)^agenda do dia$'), ver_agenda_dia))
+# ---------------------------------------------
+
 application.add_handler(MessageHandler(filters.Regex(r'.*-.+-.+'), tratar_agendamento))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback_text))
 
@@ -256,17 +221,4 @@ async def webhook():
 async def setup_webhook():
     """
     Uma rota especial que vamos visitar 1 ÚNICA VEZ
-    para dizer ao Telegram qual é o nosso URL.
-    """
-    if not APP_URL:
-        return "Erro: Variavel 'RENDER_EXTERNAL_URL' não definida."
-        
-    webhook_url = f"{APP_URL}/webhook/{TOKEN}"
-    
-    try:
-        await application.bot.set_webhook(url=webhook_url)
-        logger.info(f"Webhook configurado com sucesso para: {webhook_url}")
-        return f"Webhook configurado com sucesso!", 200
-    except Exception as e:
-        logger.error(f"Erro ao configurar o webhook: {e}")
-        return f"Erro ao configurar o webhook: {e}", 500
+    para dizer ao
