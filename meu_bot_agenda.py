@@ -1,16 +1,23 @@
 import logging
 import json
-import os # Para ler as "etiquetas secretas" (Variáveis de Ambiente)
+import os 
 from datetime import datetime
-from flask import Flask, request # O "Hotel" do Render
+from flask import Flask, request 
 
-# --- NOVAS IMPORTAÇÕES PARA O MONGODB ---
+# --- IMPORTAÇÕES PARA O MONGODB ---
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, OperationFailure
-# ---
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+
+# --- CORREÇÃO: O LOGGING VEM PRIMEIRO! ---
+# Agora definimos o "caderno" de logs aqui no topo
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+# --- FIM DA CORREÇÃO ---
 
 # --- Configuração Inicial ---
 
@@ -24,7 +31,7 @@ MONGO_URI = os.environ.get("MONGO_URI")
 APP_URL = os.environ.get("RENDER_EXTERNAL_URL")
 
 # --- Configuração da "Memória" (MongoDB) ---
-# Esta parte tenta ligar-se à tua base de dados
+client = None # Começa como "None"
 try:
     # Tenta criar um "cliente" (um assistente) para o MongoDB
     client = MongoClient(MONGO_URI)
@@ -41,18 +48,10 @@ try:
 except (ConnectionFailure, OperationFailure) as e:
     logger.error(f"❌ FALHA AO LIGAR AO MONGODB: {e}")
     logger.error("Verifica se a 'MONGO_URI' está correta no Render e se o IP 0.0.0.0/0 está no Network Access do MongoDB.")
-    client = None
     
 except Exception as e:
     logger.error(f"❌ Erro inesperado ao ligar ao MongoDB: {e}")
-    client = None
-
-# Configura o logging
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-logger = logging.getLogger(__name__)
-
+    
 
 # --- NOVAS Funções de Gestão da Agenda (A "Memória" MongoDB) ---
 
