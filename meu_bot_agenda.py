@@ -3,7 +3,7 @@ import json
 import os 
 from datetime import datetime
 from flask import Flask, request 
-import asyncio # <-- Adicionámos o "Tradutor"
+import asyncio # <-- "Tradutor"
 
 # --- IMPORTAÇÕES PARA O MONGODB ---
 from pymongo import MongoClient
@@ -190,6 +190,18 @@ application.add_handler(MessageHandler(filters.Regex(r'(?i)^agenda do dia$'), ve
 application.add_handler(MessageHandler(filters.Regex(r'.*-.+-.+'), tratar_agendamento))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback_text))
 
+
+# ----- A CORREÇÃO FINAL ESTÁ AQUI -----
+# Temos de "Ligar a Chave" (Inicializar) o bot antes de o usar.
+try:
+    logger.info("A inicializar a aplicação do Telegram...")
+    asyncio.run(application.initialize()) # <-- A "CHAVE" QUE FALTAVA!
+    logger.info("Aplicação do Telegram inicializada.")
+except Exception as e:
+    logger.error(f"Erro ao inicializar a aplicação: {e}")
+# ----- FIM DA CORREÇÃO -----
+
+
 # 3. Inicia o servidor Web (Flask)
 app = Flask(__name__)
 
@@ -198,7 +210,6 @@ def index():
     """Página inicial simples para verificar se o bot está vivo."""
     return "Olá! Eu sou o servidor do bot de agendamento (Versão MongoDB). Estou a funcionar."
 
-# ----- ESTA É A CORREÇÃO FINAL -----
 @app.route(f"/webhook/{TOKEN}", methods=['POST'])
 def webhook(): # MUDADO de 'async def' para 'def'
     """Esta é a rota (URL) que o Telegram vai 'visitar' quando receber mensagem."""
@@ -238,4 +249,3 @@ def setup_webhook(): # MUDADO de 'async def' para 'def'
     except Exception as e:
         logger.error(f"Erro ao configurar o webhook: {e}")
         return f"Erro ao configurar o webhook: {e}", 500
-# ----- FIM DA CORREÇÃO -----
