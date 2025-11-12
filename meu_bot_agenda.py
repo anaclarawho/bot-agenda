@@ -185,8 +185,7 @@ else:
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("ajuda", start))
 
-# ----- ESTA É A LINHA QUE FOI CORRIGIDA -----
-# O (?i) (flag) veio para antes do ^ (início)
+# ----- ESTA É A LINHA QUE FOI CORRIGIDA ANTERIORMENTE -----
 application.add_handler(MessageHandler(filters.Regex(r'(?i)^agenda do dia$'), ver_agenda_dia))
 # ---------------------------------------------
 
@@ -221,4 +220,17 @@ async def webhook():
 async def setup_webhook():
     """
     Uma rota especial que vamos visitar 1 ÚNICA VEZ
-    para dizer ao
+    para dizer ao Telegram qual é o nosso URL.
+    """
+    if not APP_URL:
+        return "Erro: Variavel 'RENDER_EXTERNAL_URL' não definida."
+        
+    webhook_url = f"{APP_URL}/webhook/{TOKEN}"
+    
+    try:
+        await application.bot.set_webhook(url=webhook_url)
+        logger.info(f"Webhook configurado com sucesso para: {webhook_url}")
+        return f"Webhook configurado com sucesso!", 200
+    except Exception as e:
+        logger.error(f"Erro ao configurar o webhook: {e}")
+        return f"Erro ao configurar o webhook: {e}", 500
