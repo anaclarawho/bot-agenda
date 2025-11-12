@@ -3,6 +3,7 @@ import json
 import os 
 from datetime import datetime
 from flask import Flask, request 
+import asyncio # <-- Adicionámos o "Tradutor"
 
 # --- IMPORTAÇÕES PARA O MONGODB ---
 from pymongo import MongoClient
@@ -94,6 +95,7 @@ def carregar_agenda_dia(data_iso):
         return None
 
 # --- Funções do Bot (O que ele faz) ---
+# (Estas funções 'async' estão corretas, quem as chama é a biblioteca do Telegram)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Envia uma mensagem de boas-vindas."""
@@ -184,11 +186,7 @@ else:
 # 2. Adiciona os Handlers (os "ouvintes" de comandos)
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("ajuda", start))
-
-# ----- ESTA É A LINHA QUE FOI CORRIGIDA ANTERIORMENTE -----
 application.add_handler(MessageHandler(filters.Regex(r'(?i)^agenda do dia$'), ver_agenda_dia))
-# ---------------------------------------------
-
 application.add_handler(MessageHandler(filters.Regex(r'.*-.+-.+'), tratar_agendamento))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback_text))
 
@@ -200,24 +198,28 @@ def index():
     """Página inicial simples para verificar se o bot está vivo."""
     return "Olá! Eu sou o servidor do bot de agendamento (Versão MongoDB). Estou a funcionar."
 
+# ----- ESTA É A CORREÇÃO FINAL -----
 @app.route(f"/webhook/{TOKEN}", methods=['POST'])
-async def webhook():
+def webhook(): # MUDADO de 'async def' para 'def'
     """Esta é a rota (URL) que o Telegram vai 'visitar' quando receber mensagem."""
     if not client:
          logger.error("Ignorando webhook, sem ligação ao MongoDB.")
-         return "error", 500 # Devolve um erro se a "Memória" não estiver ligada
+         return "error", 500
          
     try:
         update_json = request.get_json(force=True)
         update = Update.de_json(update_json, application.bot)
-        await application.process_update(update)
+        
+        # Usamos o "Tradutor" asyncio para chamar o código moderno
+        asyncio.run(application.process_update(update))
+        
         return "ok", 200 # Responde ao Telegram que recebeu
     except Exception as e:
         logger.error(f"Erro no webhook: {e}")
         return "error", 500
 
 @app.route("/setup_webhook")
-async def setup_webhook():
+def setup_webhook(): # MUDADO de 'async def' para 'def'
     """
     Uma rota especial que vamos visitar 1 ÚNICA VEZ
     para dizer ao Telegram qual é o nosso URL.
@@ -228,9 +230,12 @@ async def setup_webhook():
     webhook_url = f"{APP_URL}/webhook/{TOKEN}"
     
     try:
-        await application.bot.set_webhook(url=webhook_url)
+        # Usamos o "Tradutor" asyncio para chamar o código moderno
+        asyncio.run(application.bot.set_webhook(url=webhook_url))
+        
         logger.info(f"Webhook configurado com sucesso para: {webhook_url}")
-        return f"Webhook configurado com sucesso!", 200
+        return f"Webhook configurado com sucesso!", 200 # <-- AGORA VAI VER ISTO!
     except Exception as e:
         logger.error(f"Erro ao configurar o webhook: {e}")
         return f"Erro ao configurar o webhook: {e}", 500
+# ----- FIM DA CORREÇÃO -----
