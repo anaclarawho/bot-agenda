@@ -36,7 +36,6 @@ APP_URL = os.environ.get("RENDER_EXTERNAL_URL")
 NOSSO_FUSO_HORARIO = pytz.timezone("America/Sao_Paulo")
 # Configura o 'dateparser' para entender PT-BR e preferir datas no futuro
 DATEPARSER_SETTINGS = {
-    # 'LANGUAGES': ['pt'], <-- ISTO ESTAVA ERRADO!
     'PREFER_DATES_FROM': 'future',
     'TIMEZONE': 'America/Sao_Paulo',
     'DATE_ORDER': 'DMY'
@@ -69,38 +68,31 @@ def analisar_agendamento(texto_completo):
     """
     palavras = texto_completo.split()
     
-    # Tentamos encontrar uma data começando pelo fim do texto
-    for i in range(len(palavras), 0, -1):
-        # Pega a parte do texto que pode ser uma data
-        # Ex: "Bolinha da Silva amanhã 15h"
-        # 1. Tenta: "Bolinha da Silva amanhã 15h"
-        # 2. Tenta: "da Silva amanhã 15h"
-        # 3. Tenta: "Silva amanhã 15h"
-        # 4. Tenta: "amanhã 15h" <-- SUCESSO!
+    # ----- ⭐️ CORREÇÃO 1: Lógica de análise de data -----
+    # Tentamos dividir a frase em [Nome] e [Data]
+    # Iteramos por todos os pontos de divisão possíveis
+    # Ex: "Bolinha da Silva hoje 15h"
+    # 1. Nome="Bolinha", Data="da Silva hoje 15h" -> parse(Data) = None
+    # 2. Nome="Bolinha da", Data="Silva hoje 15h" -> parse(Data) = None
+    # 3. Nome="Bolinha da Silva", Data="hoje 15h" -> parse(Data) = SUCESSO!
+    
+    for i in range(1, len(palavras)): # Começa com 1 (pelo menos 1 palavra de nome)
         
-        texto_data_potencial = " ".join(palavras[i-1:])
+        nome_potencial = " ".join(palavras[:i])
+        texto_data_potencial = " ".join(palavras[i:])
         
-        # ----- ⭐️ CORREÇÃO 1: A LÍNGUA VAI AQUI! -----
         data_parseada = dateparser.parse(
             texto_data_potencial, 
-            languages=['pt'], # <-- A LÍNGUA É UM ARGUMENTO SEPARADO
+            languages=['pt'], # A língua é um argumento separado
             settings=DATEPARSER_SETTINGS
         )
-        # ----- FIM DA CORREÇÃO -----
         
         if data_parseada:
             # SUCESSO! Encontrámos a data.
-            # Tudo o que veio antes é o nome.
-            nome_cachorro = " ".join(palavras[:i-1]).strip()
+            nome_cachorro = nome_potencial.strip()
             
-            # Se o nome estiver vazio, o comando está incompleto
-            if not nome_cachorro:
-                return None, None, "Não consegui identificar o nome do cachorro antes da data."
-                
             # Verifica se o utilizador especificou uma hora
-            # Se ele disse só "Bolinha amanhã", 'dateparser' marca como 00:00
             if data_parseada.hour == 0 and data_parseada.minute == 0:
-                # Vamos ver se o utilizador não escreveu "00:00" de propósito
                 if "00:00" not in texto_data_potencial and "meia-noite" not in texto_data_potencial:
                     return None, None, "Você precisa me dizer um horário (ex: `Bolinha amanhã 15h`)."
 
@@ -111,7 +103,8 @@ def analisar_agendamento(texto_completo):
             return nome_cachorro, data_parseada, None
 
     # Se saiu do loop sem encontrar, o formato está errado
-    return None, None, "Não consegui entender a data ou hora que você digitou."
+    return None, None, "Não consegui entender a data ou hora que você digitou (Tente `Nome Data Hora`)."
+    # ----- FIM DA CORREÇÃO 1 -----
 
 async def tratar_novo_agendamento(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Tenta agendar um novo horário a partir de texto livre."""
@@ -151,7 +144,10 @@ def analisar_consulta_agenda(texto_consulta):
     Retorna (data_inicio, data_fim, titulo_agenda)
     """
     hoje = get_hoje().replace(hour=0, minute=0, second=0, microsecond=0)
-    texto = texto_consulta.lower().replace("agenda de", "").replace("agenda do", "").replace("agenda", "").strip()
+    
+    # ----- ⭐️ CORREÇÃO 2: Limpar "agenda da" -----
+    texto = texto_consulta.lower().replace("agenda de", "").replace("agenda do", "").replace("agenda da", "").replace("agenda", "").strip()
+    # ----- FIM DA CORREÇÃO 2 -----
     
     # 1. Atalhos de Tempo
     if texto == "hoje" or texto == "dia":
@@ -180,13 +176,11 @@ def analisar_consulta_agenda(texto_consulta):
 
     # 3. Datas Específicas (Ex: "13/11" ou "segunda-feira" ou "agosto")
     
-    # ----- ⭐️ CORREÇÃO 2: A LÍNGUA VAI AQUI! -----
     data_parseada = dateparser.parse(
         texto, 
-        languages=['pt'], # <-- A LÍNGUA É UM ARGUMENTO SEPARADO
+        languages=['pt'], # A língua é um argumento separado
         settings=DATEPARSER_SETTINGS
     )
-    # ----- FIM DA CORREÇÃO -----
 
     if not data_parseada:
         return None, None, f"😕 Desculpe, não entendi o período '{texto}'."
