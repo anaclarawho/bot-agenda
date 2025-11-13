@@ -35,13 +35,18 @@ APP_URL = os.environ.get("RENDER_EXTERNAL_URL")
 # --- Configuração de Fuso Horário e Data (ESSENCIAL) ---
 NOSSO_FUSO_HORARIO = pytz.timezone("America/Sao_Paulo")
 
-# ----- ⭐️ CORREÇÃO V5: Configuração de Data Correta -----
+def get_hoje():
+    """Retorna a data/hora de 'hoje' no nosso fuso horário."""
+    return datetime.now(NOSSO_FUSO_HORARIO)
+
+# ----- ⭐️ CORREÇÃO V7: A Configuração de Data DEFINITIVA -----
 DATEPARSER_SETTINGS = {
     'PREFER_DATES_FROM': 'future',
-    'TIMEZONE': 'America/Sao_Paulo', # <-- O FUSO TEM DE ESTAR AQUI
+    'TIMEZONE': 'America/Sao_Paulo', # Fuso horário de SAÍDA
+    'RELATIVE_BASE': get_hoje(),     # Fuso horário de ENTRADA (O que é "hoje"?)
     'DATE_ORDER': 'DMY'
 }
-# ----- FIM DA CORREÇÃO V5 -----
+# ----- FIM DA CORREÇÃO V7 -----
 
 # --- Configuração da "Memória" (MongoDB) ---
 client = None 
@@ -55,10 +60,6 @@ except Exception as e:
     logger.error(f"❌ Erro fatal ao ligar ao MongoDB: {e}")
     
 # --- FUNÇÕES PRINCIPAIS DO BOT ---
-
-def get_hoje():
-    """Retorna a data/hora de 'hoje' no nosso fuso horário."""
-    return datetime.now(NOSSO_FUSO_HORARIO)
 
 # --- 1. FUNÇÕES DE AGENDAMENTO (O NOVO "CÉREBRO") ---
 
@@ -76,8 +77,13 @@ def analisar_agendamento(texto_completo):
         nome_potencial = " ".join(palavras[:i])
         texto_data_potencial = " ".join(palavras[i:])
         
+        # ----- ⭐️ CORREÇÃO V7: "Traduzir" o 'h' de hora -----
+        # Troca "15h" por "15:00" antes de analisar
+        texto_data_limpo = re.sub(r'(\d+)h', r'\1:00', texto_data_potencial, flags=re.IGNORECASE)
+        # ----- FIM DA CORREÇÃO -----
+        
         data_parseada = dateparser.parse(
-            texto_data_potencial, 
+            texto_data_limpo, # Usa o texto limpo
             languages=['pt'], # A língua é um argumento separado
             settings=DATEPARSER_SETTINGS
         )
@@ -86,14 +92,12 @@ def analisar_agendamento(texto_completo):
             # SUCESSO! Encontrámos a data.
             nome_cachorro = nome_potencial.strip()
             
-            # ----- ⭐️ CORREÇÃO V5: O dateparser agora já retorna a data com fuso -----
-            # Não precisamos mais "localizar" manualmente.
+            # O dateparser agora já retorna a data com fuso correto
             data_com_fuso = data_parseada
-            # ----- FIM DA CORREÇÃO -----
             
             # Verifica se o utilizador especificou uma hora
             if data_com_fuso.hour == 0 and data_com_fuso.minute == 0:
-                if "00:00" not in texto_data_potencial and "meia-noite" not in texto_data_potencial:
+                if "00:00" not in texto_data_limpo and "meia-noite" not in texto_data_limpo:
                     return None, None, "Você precisa me dizer um horário (ex: `Bolinha amanhã 15h`)."
 
             # Formata os dados para o MongoDB
@@ -174,8 +178,12 @@ def analisar_consulta_agenda(texto_consulta):
 
     # 3. Datas Específicas (Ex: "13/11" ou "segunda-feira" ou "agosto")
     
+    # ----- ⭐️ CORREÇÃO V7: "Traduzir" o 'h' de hora -----
+    texto_limpo = re.sub(r'(\d+)h', r'\1:00', texto, flags=re.IGNORECASE)
+    # ----- FIM DA CORREÇÃO -----
+    
     data_parseada = dateparser.parse(
-        texto, 
+        texto_limpo, 
         languages=['pt'], # A língua é um argumento separado
         settings=DATEPARSER_SETTINGS
     )
@@ -191,8 +199,6 @@ def analisar_consulta_agenda(texto_consulta):
     if texto in nomes_meses_pt:
         mes_num = nomes_meses_pt.index(texto) + 1
         ano = hoje.year
-        # Se o mês já passou (ex: estamos em Novembro e pede "Agosto"), assume este ano
-        # Se estamos em Janeiro e pede "Agosto", assume este ano
         inicio_mes = hoje.replace(year=ano, month=mes_num, day=1)
         _, ultimo_dia = monthrange(ano, mes_num)
         fim_mes = hoje.replace(year=ano, month=mes_num, day=ultimo_dia)
@@ -200,7 +206,6 @@ def analisar_consulta_agenda(texto_consulta):
         return inicio_mes, fim_mes, titulo
         
     # Se for um dia da semana (ex: "segunda-feira")
-    # O dateparser já nos dá o *próximo* dia (ex: próxima segunda)
     # Se for um dia específico (ex: "13/11")
     return data_com_fuso, data_com_fuso, f"🗓️ Agenda de {format_date(data_com_fuso, 'cccc, dd/MM/yyyy', locale='pt_BR').capitalize()}"
 
