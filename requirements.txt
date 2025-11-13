@@ -1,5 +1,12 @@
+# Ficheiro: requirements.txt
+
 python-telegram-bot[job-queue]
 quart
 pymongo[srv]
 dnspython
 hypercorn
+
+# --- NOSSAS NOVAS FERRAMENTAS ---
+dateparser
+Babel
+
