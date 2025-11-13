@@ -34,12 +34,15 @@ APP_URL = os.environ.get("RENDER_EXTERNAL_URL")
 
 # --- Configuração de Fuso Horário e Data (ESSENCIAL) ---
 NOSSO_FUSO_HORARIO = pytz.timezone("America/Sao_Paulo")
-# Configura o 'dateparser' para entender PT-BR e preferir datas no futuro
+
+# ----- ⭐️ CORREÇÃO V4: Simplificando o Dateparser -----
+# Removemos o TIMEZONE daqui para evitar conflitos com o UTC do servidor.
+# Vamos aplicar o fuso horário manualmente.
 DATEPARSER_SETTINGS = {
     'PREFER_DATES_FROM': 'future',
-    'TIMEZONE': 'America/Sao_Paulo',
     'DATE_ORDER': 'DMY'
 }
+# ----- FIM DA CORREÇÃO V4 -----
 
 # --- Configuração da "Memória" (MongoDB) ---
 client = None 
@@ -68,7 +71,7 @@ def analisar_agendamento(texto_completo):
     """
     palavras = texto_completo.split()
     
-    # ----- ⭐️ CORREÇÃO 1: Lógica de análise de data -----
+    # ----- ⭐️ CORREÇÃO V4: Lógica de análise de data -----
     # Tentamos dividir a frase em [Nome] e [Data]
     # Iteramos por todos os pontos de divisão possíveis
     # Ex: "Bolinha da Silva hoje 15h"
@@ -81,6 +84,7 @@ def analisar_agendamento(texto_completo):
         nome_potencial = " ".join(palavras[:i])
         texto_data_potencial = " ".join(palavras[i:])
         
+        # O dateparser vai nos dar um objeto "naive" (sem fuso horário)
         data_parseada = dateparser.parse(
             texto_data_potencial, 
             languages=['pt'], # A língua é um argumento separado
@@ -91,20 +95,26 @@ def analisar_agendamento(texto_completo):
             # SUCESSO! Encontrámos a data.
             nome_cachorro = nome_potencial.strip()
             
+            # ----- ⭐️ CORREÇÃO V4: Aplicar o fuso horário manualmente -----
+            # O dateparser retornou uma data "naive".
+            # Nós dizemos a ela: "Você é de São Paulo".
+            data_com_fuso = NOSSO_FUSO_HORARIO.localize(data_parseada)
+            # ----- FIM DA CORREÇÃO -----
+            
             # Verifica se o utilizador especificou uma hora
-            if data_parseada.hour == 0 and data_parseada.minute == 0:
+            if data_com_fuso.hour == 0 and data_com_fuso.minute == 0:
                 if "00:00" not in texto_data_potencial and "meia-noite" not in texto_data_potencial:
                     return None, None, "Você precisa me dizer um horário (ex: `Bolinha amanhã 15h`)."
 
             # Formata os dados para o MongoDB
-            data_iso = data_parseada.strftime("%Y-%m-%d") # AAAA-MM-DD
-            hora_str = data_parseada.strftime("%H:%M") # HH:MM
+            data_iso = data_com_fuso.strftime("%Y-%m-%d") # AAAA-MM-DD
+            hora_str = data_com_fuso.strftime("%H:%M") # HH:MM
             
-            return nome_cachorro, data_parseada, None
+            return nome_cachorro, data_com_fuso, None
 
     # Se saiu do loop sem encontrar, o formato está errado
     return None, None, "Não consegui entender a data ou hora que você digitou (Tente `Nome Data Hora`)."
-    # ----- FIM DA CORREÇÃO 1 -----
+    # ----- FIM DA CORREÇÃO V4 -----
 
 async def tratar_novo_agendamento(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Tenta agendar um novo horário a partir de texto livre."""
@@ -145,9 +155,9 @@ def analisar_consulta_agenda(texto_consulta):
     """
     hoje = get_hoje().replace(hour=0, minute=0, second=0, microsecond=0)
     
-    # ----- ⭐️ CORREÇÃO 2: Limpar "agenda da" -----
+    # ----- ⭐️ CORREÇÃO V4: Limpar "agenda da" -----
     texto = texto_consulta.lower().replace("agenda de", "").replace("agenda do", "").replace("agenda da", "").replace("agenda", "").strip()
-    # ----- FIM DA CORREÇÃO 2 -----
+    # ----- FIM DA CORREÇÃO V4 -----
     
     # 1. Atalhos de Tempo
     if texto == "hoje" or texto == "dia":
@@ -184,8 +194,10 @@ def analisar_consulta_agenda(texto_consulta):
 
     if not data_parseada:
         return None, None, f"😕 Desculpe, não entendi o período '{texto}'."
-        
-    data_parseada = data_parseada.replace(tzinfo=NOSSO_FUSO_HORARIO)
+    
+    # ----- ⭐️ CORREÇÃO V4: Aplicar o fuso horário manualmente -----
+    data_com_fuso = NOSSO_FUSO_HORARIO.localize(data_parseada)
+    # ----- FIM DA CORREÇÃO -----
     
     # Se for um nome de mês (ex: "agosto")
     nomes_meses_pt = [month_name[i].lower() for i in range(1, 13)]
@@ -203,7 +215,7 @@ def analisar_consulta_agenda(texto_consulta):
     # Se for um dia da semana (ex: "segunda-feira")
     # O dateparser já nos dá o *próximo* dia (ex: próxima segunda)
     # Se for um dia específico (ex: "13/11")
-    return data_parseada, data_parseada, f"🗓️ Agenda de {format_date(data_parseada, 'cccc, dd/MM/yyyy', locale='pt_BR').capitalize()}"
+    return data_com_fuso, data_com_fuso, f"🗓️ Agenda de {format_date(data_com_fuso, 'cccc, dd/MM/yyyy', locale='pt_BR').capitalize()}"
 
 async def tratar_ver_agenda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto_completo = update.message.text
