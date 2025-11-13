@@ -36,7 +36,7 @@ APP_URL = os.environ.get("RENDER_EXTERNAL_URL")
 NOSSO_FUSO_HORARIO = pytz.timezone("America/Sao_Paulo")
 # Configura o 'dateparser' para entender PT-BR e preferir datas no futuro
 DATEPARSER_SETTINGS = {
-    'languages': ['pt'],
+    'LANGUAGES': ['pt'], # <-- ⭐️ CORREÇÃO 1: 'LANGUAGES' em maiúsculo
     'PREFER_DATES_FROM': 'future',
     'TIMEZONE': 'America/Sao_Paulo',
     'DATE_ORDER': 'DMY'
@@ -313,7 +313,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = update.message.text.lower().strip()
     
     try:
-        if texto.startswith("agenda"):
+        # --- ⭐️ CORREÇÃO 2: Capturar 'ajuda' sem o '/' ---
+        if texto == "ajuda":
+            await comando_ajuda(update, context)
+        # --- FIM DA CORREÇÃO ---
+            
+        elif texto.startswith("agenda"):
             await tratar_ver_agenda(update, context)
             
         elif texto.startswith("apagar"):
@@ -525,8 +530,11 @@ async def webhook(): # 'async def'
     try:
         update_json = await request.get_json(force=True)
         update = Update.de_json(update_json, application.bot)
+        
+        # Agora podemos chamar 'await' diretamente!
         await application.process_update(update) 
-        return "ok", 200
+        
+        return "ok", 200 # Responde ao Telegram que recebeu
     except Exception as e:
         logger.error(f"Erro no webhook: {e}")
         return "error", 500
