@@ -36,7 +36,7 @@ APP_URL = os.environ.get("RENDER_EXTERNAL_URL")
 NOSSO_FUSO_HORARIO = pytz.timezone("America/Sao_Paulo")
 # Configura o 'dateparser' para entender PT-BR e preferir datas no futuro
 DATEPARSER_SETTINGS = {
-    'LANGUAGES': ['pt'], # <-- ⭐️ CORREÇÃO 1: 'LANGUAGES' em maiúsculo
+    # 'LANGUAGES': ['pt'], <-- ISTO ESTAVA ERRADO!
     'PREFER_DATES_FROM': 'future',
     'TIMEZONE': 'America/Sao_Paulo',
     'DATE_ORDER': 'DMY'
@@ -79,7 +79,14 @@ def analisar_agendamento(texto_completo):
         # 4. Tenta: "amanhã 15h" <-- SUCESSO!
         
         texto_data_potencial = " ".join(palavras[i-1:])
-        data_parseada = dateparser.parse(texto_data_potencial, settings=DATEPARSER_SETTINGS)
+        
+        # ----- ⭐️ CORREÇÃO 1: A LÍNGUA VAI AQUI! -----
+        data_parseada = dateparser.parse(
+            texto_data_potencial, 
+            languages=['pt'], # <-- A LÍNGUA É UM ARGUMENTO SEPARADO
+            settings=DATEPARSER_SETTINGS
+        )
+        # ----- FIM DA CORREÇÃO -----
         
         if data_parseada:
             # SUCESSO! Encontrámos a data.
@@ -172,7 +179,15 @@ def analisar_consulta_agenda(texto_consulta):
         return inicio_mes, fim_mes, titulo
 
     # 3. Datas Específicas (Ex: "13/11" ou "segunda-feira" ou "agosto")
-    data_parseada = dateparser.parse(texto, settings=DATEPARSER_SETTINGS)
+    
+    # ----- ⭐️ CORREÇÃO 2: A LÍNGUA VAI AQUI! -----
+    data_parseada = dateparser.parse(
+        texto, 
+        languages=['pt'], # <-- A LÍNGUA É UM ARGUMENTO SEPARADO
+        settings=DATEPARSER_SETTINGS
+    )
+    # ----- FIM DA CORREÇÃO -----
+
     if not data_parseada:
         return None, None, f"😕 Desculpe, não entendi o período '{texto}'."
         
@@ -316,7 +331,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # --- ⭐️ CORREÇÃO 2: Capturar 'ajuda' sem o '/' ---
         if texto == "ajuda":
             await comando_ajuda(update, context)
-        # --- FIM DA CORREÇÃO ---
             
         elif texto.startswith("agenda"):
             await tratar_ver_agenda(update, context)
